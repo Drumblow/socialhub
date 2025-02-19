@@ -1,0 +1,81 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*.bak
+*.orig
+.project
+.classpath
+.settings/
+*.sublime-*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Internal documentation
+dev-guidelines.md
+project-analysis.md
+project-docs.md
+docs/internal/
+*.draft.md
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+logs/
+temp/
+
+# Test coverage reports
+coverage/
+.coverage
+coverage.xml
+*.lcov
+
+# Cache directories
+.cache/
+.npm/
+.yarn/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Local configuration
+config.local.toml
+*.local.rs
+
+# Debug files
+*.debug
+debug/
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
+
+# Local certificates
+*.pem
+*.key
+*.crt

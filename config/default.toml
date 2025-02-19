@@ -1,0 +1,20 @@
+[server]
+host = "127.0.0.1"
+port = 8080
+workers = 4
+
+[database]
+url = "postgres://localhost/socialhub"
+max_connections = 5
+
+[cache]
+ttl_seconds = 3600
+max_size = 1000
+
+[media]
+upload_dir = "./uploads"
+max_file_size = 10485760  # 10MB
+
+[auth]
+token_expiration = 86400  # 24 hours
+refresh_token_expiration = 604800  # 7 days

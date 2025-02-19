@@ -1,0 +1,40 @@
+openapi: 3.0.0
+info:
+  title: SocialHub API
+  version: 1.0.0
+  description: API documentation for SocialHub platform
+
+paths:
+  /auth/login:
+    post:
+      summary: User login
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Login successful
+          
+  /media/upload:
+    post:
+      summary: Upload media file
+      tags: [Media]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Upload successful
