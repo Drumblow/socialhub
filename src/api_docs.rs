@@ -23,7 +23,11 @@ use utoipa::OpenApi;
         // Media routes
         socialhub_media::handlers::upload,  // Changed from upload_media to upload
         socialhub_media::handlers::get_media,
-        socialhub_media::handlers::update_metadata
+        socialhub_media::handlers::update_metadata,
+        
+        // Addon routes
+        addon_manager::web::configure_addon,
+        addon_manager::web::get_addon_config
     ),
     components(
         schemas(
@@ -44,14 +48,18 @@ use utoipa::OpenApi;
             // Media schemas
             socialhub_media::models::Media,
             socialhub_media::handlers::UploadRequest,
-            socialhub_media::handlers::MetadataUpdate
+            socialhub_media::handlers::MetadataUpdate,
+            
+            // Addon schemas
+            addon_manager::web::AddonConfig
         )
     ),
     tags(
         (name = "streaming", description = "Live streaming endpoints"),
         (name = "auth", description = "Authentication endpoints"),
         (name = "social", description = "Social features endpoints"),
-        (name = "media", description = "Media management endpoints")
+        (name = "media", description = "Media management endpoints"),
+        (name = "addons", description = "Addon management endpoints")
     ),
     security(
         ("bearer_token" = [])

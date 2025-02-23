@@ -1,16 +1,25 @@
-pub mod common;
 pub mod config;
 pub mod routes;
-pub mod api_docs;  // Este módulo agora deve apontar para src/api_docs.rs
+
+pub use config::types::CacheConfig;
+
+// Usar o cache do core
+pub use socialhub_core::cache::CacheManager;
 
 pub use socialhub_auth as auth;
 pub use socialhub_media as media;
 pub use socialhub_social as social;
 pub use socialhub_streaming as streaming;
 
-// Re-export principais tipos
-pub use common::cache::CacheManager;
-pub use config::Config;
+use actix_web::web;
+
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/addons")
+            .service(web::resource("/install").route(web::post().to(routes::addons::install)))
+            .service(web::resource("/list").route(web::get().to(routes::addons::list)))  // Adicionar esta linha
+    );
+}
 
 #[cfg(test)]
 mod tests {
@@ -35,15 +44,5 @@ mod tests {
                 .to_request()
         ).await;
         assert!(login_resp.status().is_success());
-    }
-
-    #[actix_rt::test]
-    async fn test_media_flow() {
-        // Similar test for media module
-    }
-
-    #[actix_rt::test]
-    async fn test_social_flow() {
-        // Similar test for social module
     }
 }

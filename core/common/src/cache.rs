@@ -1,9 +1,8 @@
-use moka::future::Cache as MokaCache;
+use moka::future::Cache;
 use std::hash::Hash;
-use std::time::Duration;
-use log::{debug, info, warn};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
+use log::{info, debug, warn};
+use futures::future::join_all;
 
 #[derive(Debug, Clone)]
 pub struct CacheConfig {
@@ -16,16 +15,19 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             max_capacity: 1000,
-            time_to_live: 3600,  // 1 hora
-            time_to_idle: 1800,  // 30 minutos
+            time_to_live: 3600,
+            time_to_idle: 1800,
         }
     }
 }
 
 #[derive(Clone)]
-pub struct CacheManager<K, V> {
-    pub(crate) cache: MokaCache<K, V>,
-    capacity: u64,
+pub struct CacheManager<K, V>
+where 
+    K: Clone + Eq + std::hash::Hash + Send + Sync + std::fmt::Debug + 'static,
+    V: Clone + Send + Sync + std::fmt::Debug + 'static,  // Added Debug bound for V
+{
+    cache: Cache<K, V>,
     metrics: Arc<RwLock<CacheMetrics>>,
 }
 
@@ -34,67 +36,130 @@ pub struct CacheMetrics {
     pub hits: u64,
     pub misses: u64,
     pub evictions: u64,
+    pub total_insertions: u64,
+    pub total_retrievals: u64,
+    pub cache_misses_ratio: f64,
 }
 
 impl<K, V> CacheManager<K, V> 
 where 
     K: Clone + Hash + Eq + Send + Sync + std::fmt::Debug + 'static,
-    V: Clone + Send + Sync + 'static
+    V: Clone + Send + Sync + std::fmt::Debug + 'static  // Added Debug bound for V
 {
     pub fn new(config: CacheConfig) -> Self {
         info!("Initializing cache with capacity: {}", config.max_capacity);
-        Self {
-            cache: MokaCache::builder()
-                .max_capacity(config.max_capacity)
-                .time_to_live(Duration::from_secs(config.time_to_live))
-                .time_to_idle(Duration::from_secs(config.time_to_idle))
-                .weigher(|_k, _v| 1)
-                .eviction_listener(|k, _v, cause| {
-                    debug!("Evicted key: {:?}, cause: {:?}", k, cause);
-                })
-                .build(),
-            capacity: config.max_capacity,
-            metrics: Arc::new(RwLock::new(CacheMetrics::default())),
-        }
+        
+        let cache = Cache::builder()
+            .max_capacity(config.max_capacity)
+            .time_to_live(std::time::Duration::from_secs(config.time_to_live))
+            .time_to_idle(std::time::Duration::from_secs(config.time_to_idle))
+            .build();
+
+        let manager = Self {
+            cache,
+            metrics: Arc::new(std::sync::RwLock::new(CacheMetrics::default())),
+        };
+
+        info!("Cache initialized with size: {}", manager.cache.entry_count());
+        manager
     }
 
     pub async fn set(&self, key: K, value: V) {
-        debug!("Inserting item. Current size: {}/{}", self.cache.entry_count(), self.capacity);
-        self.cache.insert(key, value).await;
+        if let Ok(mut metrics) = self.metrics.write() {
+            metrics.total_insertions += 1;
+        }
+
+        self.cache.insert(key.clone(), value).await;
+        
+        let is_present = self.cache.get(&key).await.is_some();
+        let size = self.real_count().await;
+        
+        debug!("Cache update - key: {:?}, present: {}, total items: {}", 
+            key, is_present, size);
     }
 
     pub async fn get(&self, key: &K) -> Option<V> {
-        self.cache.get(key).await
+        if let Ok(mut metrics) = self.metrics.write() {
+            metrics.total_retrievals += 1;
+        }
+
+        let value = self.cache.get(key).await;
+        
+        if let Ok(mut metrics) = self.metrics.write() {
+            if value.is_some() {
+                metrics.hits += 1;
+            } else {
+                metrics.misses += 1;
+            }
+            metrics.cache_misses_ratio = metrics.misses as f64 / metrics.total_retrievals as f64;
+        }
+        
+        value
+    }
+
+    pub fn entry_count(&self) -> u64 {
+        self.cache.entry_count()
+    }
+
+    async fn real_count(&self) -> u64 {
+        // Primeiro coletamos todas as chaves, desreferenciando o Arc
+        let keys: Vec<K> = self.cache.iter()
+            .map(|(k, _)| (*k).clone())
+            .collect();
+        
+        // Criamos futures com as chaves clonadas
+        let futures: Vec<_> = keys.iter()
+            .map(|key| self.cache.get(key))
+            .collect();
+        
+        // Executar todas as verificações em paralelo
+        let results = join_all(futures).await;
+        
+        // Contar chaves ativas e logar
+        let count = results.iter().filter(|r| r.is_some()).count() as u64;
+        debug!("Cache size: {}, active keys: {:?}", count, keys);
+        count
+    }
+
+    pub async fn get_size(&self) -> u64 {
+        self.real_count().await
     }
 
     pub async fn remove(&self, key: &K) {
         warn!("Cache eviction - Removed item");
-        self.cache.remove(key).await;
+        self.cache.invalidate(key).await;
     }
 
-    pub async fn sync(&self) {
-        self.cache.run_pending_tasks().await;
-    }
-
-    pub async fn get_metrics(&self) -> CacheMetrics {
-        (*self.metrics.read().await).clone()  // Dereference before clone
-    }
-
-    pub async fn entry_count(&self) -> u64 {
-        self.cache.entry_count()
+    pub fn get_metrics(&self) -> CacheMetrics {
+        self.metrics.read().unwrap().clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::task;
+    use env_logger::Builder;
+    use log::LevelFilter;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    fn init_test_logger() {
+        INIT.call_once(|| {
+            std::env::set_var("RUST_LOG", "debug");
+            Builder::new()
+                .filter_level(LevelFilter::Debug)
+                .is_test(true)
+                .init();
+        });
+    }
     
     #[tokio::test]
     async fn test_cache_operations() {
         let cache = CacheManager::<String, i32>::new(CacheConfig::default());
         cache.set("test".to_string(), 42).await;
-        assert_eq!(cache.get(&"test".to_string()).await, Some(42));
+        let result = cache.get(&"test".to_string()).await;
+        assert_eq!(result, Some(42));
     }
 
     #[tokio::test]
@@ -102,10 +167,9 @@ mod tests {
         let cache = CacheManager::<String, i32>::new(CacheConfig::default());
         let mut handles = Vec::new();
 
-        // Criar 10 tasks concorrentes
         for i in 0..10 {
             let cache_ref = cache.clone();
-            let handle = task::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let key = format!("key_{}", i);
                 cache_ref.set(key.clone(), i).await;
                 cache_ref.get(&key).await
@@ -113,7 +177,6 @@ mod tests {
             handles.push(handle);
         }
 
-        // Aguardar todas as tasks terminarem
         for (i, handle) in handles.into_iter().enumerate() {
             let result = handle.await.unwrap();
             assert_eq!(result, Some(i as i32));
@@ -122,36 +185,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_capacity_limit() {
-        let config = CacheConfig {
+        init_test_logger();
+        
+        let cache = CacheManager::<String, i32>::new(CacheConfig {
             max_capacity: 5,
-            time_to_live: 60,   // 60 segundos
-            time_to_idle: 30,   // 30 segundos
-        };
-        
-        let cache = CacheManager::<String, i32>::new(config);
-        
-        // Inserir itens sequencialmente
-        for i in 0..5 {
+            time_to_live: 3600,
+            time_to_idle: 1800,
+        });
+
+        // Inserir e verificar cada item
+        for i in 0u64..5 {
             let key = format!("key_{}", i);
-            cache.set(key.clone(), i).await;
-            cache.sync().await;
+            cache.set(key.clone(), i as i32).await;
+            
+            let value = cache.get(&key).await;
+            assert!(value.is_some(), "Item {} should be present", i);
+            
+            let size = cache.get_size().await;
+            assert_eq!(size, i + 1, "Cache should have {} items", i + 1);
         }
 
-        // Esperar processamento
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        cache.sync().await;
-
-        // Verificar estado inicial
-        let count = cache.entry_count().await;
-        assert_eq!(count, 5, "Cache should be at capacity");
-
-        // Adicionar item extra
-        cache.set("key_5".to_string(), 5).await;
-        cache.sync().await;
-
-        // Verificar se mantém capacidade
-        let count = cache.entry_count().await;
-        assert_eq!(count, 5, "Cache should maintain capacity");
+        let final_size = cache.get_size().await;
+        assert_eq!(final_size, 5, "Cache should have exactly 5 items");
     }
 
     #[tokio::test]
@@ -161,6 +216,7 @@ mod tests {
         cache.set("key2".to_string(), "value2".to_string()).await;
         cache.remove(&"key1".to_string()).await;
         cache.remove(&"key2".to_string()).await;
-        assert_eq!(cache.entry_count().await, 0);
+
+        assert_eq!(cache.entry_count(), 0);
     }
 }

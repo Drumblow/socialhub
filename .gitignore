@@ -35,7 +35,12 @@ Thumbs.db
 dev-guidelines.md
 project-analysis.md
 project-docs.md
+stremio-integration.md
 docs/internal/
+docs/InspiracaoStremio/
+advanced_addons_Stremio.md
+SugestoespeloGrokparaproximospassos.txt
+
 *.draft.md
 
 # Logs and databases

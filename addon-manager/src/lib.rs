@@ -1,20 +1,30 @@
-use actix_web::web;
+use actix_web::web::{self as actix_web_config, ServiceConfig, scope, resource, get, post};
 
 mod plugin;
 mod sandbox;
 mod manager;
 mod error;
+pub mod stremio;
+pub mod web;  // Agora é público diretamente
 
 pub use plugin::Plugin;
 pub use manager::AddonManager;
 
-pub fn configure(cfg: &mut web::ServiceConfig) {
+pub fn configure(cfg: &mut ServiceConfig) {
     cfg.service(
-        web::scope("/addons")
-            .service(web::resource("/install").route(web::post().to(manager::install_addon)))
-            .service(web::resource("/list").route(web::get().to(manager::list_addons)))
-            .service(web::resource("/{id}/enable").route(web::post().to(manager::enable_addon)))
-            .service(web::resource("/{id}/disable").route(web::post().to(manager::disable_addon)))
+        scope("/addons")
+            .service(resource("/install").route(post().to(manager::install_addon)))
+            .service(resource("/list").route(get().to(manager::list_addons)))
+            .service(resource("/{id}/enable").route(post().to(manager::enable_addon)))
+            .service(resource("/{id}/disable").route(post().to(manager::disable_addon)))
+            .service(
+                resource("/{id}/configure")
+                    .route(post().to(web::configure_addon))
+            )
+            .service(
+                resource("/{id}/config")
+                    .route(get().to(web::get_addon_config))
+            )
     );
 }
 
@@ -25,10 +35,10 @@ pub mod tests {
     use uuid::Uuid;
     use serde_json::json;
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_install_addon() {
         let app = test::init_service(
-            App::new().service(web::scope("/addons").route("/install", web::post().to(manager::install_addon)))
+            App::new().service(actix_web_config::scope("/addons").route("/install", actix_web_config::post().to(manager::install_addon)))
         ).await;
 
         let req = test::TestRequest::post()
@@ -43,10 +53,10 @@ pub mod tests {
         assert!(resp.status().is_success());
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_list_addons() {
         let app = test::init_service(
-            App::new().service(web::scope("/addons").route("/list", web::get().to(manager::list_addons)))
+            App::new().service(actix_web_config::scope("/addons").route("/list", actix_web_config::get().to(manager::list_addons)))
         ).await;
 
         let req = test::TestRequest::get()
@@ -57,16 +67,16 @@ pub mod tests {
         assert!(resp.status().is_success());
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_enable_addon() {
         // ...existing test code...
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_disable_addon() {
         let addon_id = Uuid::new_v4();
         let app = test::init_service(
-            App::new().service(web::scope("/addons").route("/{id}/disable", web::post().to(manager::disable_addon)))
+            App::new().service(actix_web_config::scope("/addons").route("/{id}/disable", actix_web_config::post().to(manager::disable_addon)))
         ).await;
 
         let req = test::TestRequest::post()
@@ -76,4 +86,40 @@ pub mod tests {
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
     }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::web::{AddonConfig, configure_addon, get_addon_config};
+    use actix_web::{test, App, web};
+    use uuid::Uuid;
+
+    #[actix_web::test]
+    async fn test_web_configure_addon() {
+        let app = test::init_service(
+            App::new().service(
+                web::resource("/addon/{id}/configure")
+                    .route(web::post().to(configure_addon))
+            )
+        ).await;
+
+        let config = AddonConfig {
+            id: "test-addon".to_string(),
+            enabled: true,
+            catalog_filters: Some(vec!["Action".to_string()]),
+            max_results: Some(100),
+            preferred_quality: Some("HD".to_string()),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/addon/test-addon/configure")
+            .set_json(&config)
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+    }
+
+    // ...existing tests...
 }

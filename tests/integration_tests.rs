@@ -1,10 +1,9 @@
-use actix_web::{test, web, App, http::header};
-use actix_web::web::Bytes;  // Usar Bytes do actix-web
+use actix_web::{test, App, http::header};
 use socialhub_auth;
 use socialhub_media;
 use socialhub_social;
 use socialhub_streaming;
-use socialhub_addon_manager;
+use socialhub;
 
 #[actix_rt::test]
 async fn test_complete_flow() {
@@ -15,7 +14,7 @@ async fn test_complete_flow() {
                 socialhub_media::configure(cfg);
                 socialhub_social::configure(cfg);
                 socialhub_streaming::configure(cfg);
-                socialhub_addon_manager::configure(cfg);
+                socialhub::configure(cfg);
             })
     ).await;
 
@@ -64,4 +63,57 @@ async fn test_auth_with_media_upload() {
 
     let upload_resp = test::call_service(&app, upload_req).await;
     assert!(upload_resp.status().is_success());
+}
+
+#[actix_rt::test]
+async fn test_addon_integration() {
+    let app = test::init_service(
+        App::new()
+            .configure(socialhub::configure)
+            .configure(addon_manager::configure)  // Adicionar configuração do addon_manager
+    ).await;
+
+    // Primeiro instalar um addon para testar
+    let install_req = test::TestRequest::post()
+        .uri("/addons/install")
+        .set_json(serde_json::json!({
+            "name": "test-addon",
+            "version": "1.0.0"
+        }))
+        .to_request();
+
+    let install_resp = test::call_service(&app, install_req).await;
+    assert!(install_resp.status().is_success(), "Failed to install addon");
+
+    // Então tentar listar os addons
+    let list_req = test::TestRequest::get()
+        .uri("/addons/list")
+        .to_request();
+
+    let list_resp = test::call_service(&app, list_req).await;
+    assert!(list_resp.status().is_success(), "Failed to list addons");
+
+    // Verificar o conteúdo da resposta
+    let body: serde_json::Value = test::read_body_json(list_resp).await;
+    assert!(body.as_array().unwrap().len() > 0, "Addon list should not be empty");
+}
+
+#[actix_rt::test]
+async fn test_addon_installation() {
+    let app = test::init_service(
+        App::new()
+            .configure(socialhub::configure)
+    ).await;
+
+    let resp = test::call_service(&app,
+        test::TestRequest::post()
+            .uri("/addons/install")
+            .set_json(serde_json::json!({
+                "name": "test-addon",
+                "version": "1.0.0"
+            }))
+            .to_request()
+    ).await;
+
+    assert!(resp.status().is_success());
 }

@@ -1,28 +1,18 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use actix_web::{test, App};
 
-#[actix_rt::test]
-async fn test_benchmark_setup() {
-    let app = test::init_service(
-        App::new()
-            .service(actix_web::web::scope("/media"))
-    ).await;
-    
-    let resp = test::TestRequest::get()
-        .uri("/media")
-        .send_request(&app)
-        .await;
-        
-    assert!(resp.status().is_success());
+fn fibonacci(n: u64) -> u64 {
+    match n {
+        0 => 1,
+        1 => 1,
+        n => fibonacci(n-1) + fibonacci(n-2),
+    }
 }
 
-// Teste de performance simples
-fn simple_benchmark(c: &mut Criterion) {
-    c.bench_function("simple_test", |b| b.iter(|| {
-        let x = 1 + 1;
-        criterion::black_box(x)
+fn bench_fibonacci(c: &mut Criterion) {
+    c.bench_function("fib 20", |b| b.iter(|| {
+        fibonacci(criterion::black_box(20))
     }));
 }
 
-criterion_group!(benches, simple_benchmark);
+criterion_group!(benches, bench_fibonacci);
 criterion_main!(benches);

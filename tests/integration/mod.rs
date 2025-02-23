@@ -2,32 +2,35 @@ pub mod auth_media_flow;
 pub mod social_streaming_flow;
 
 use actix_web::{
-    dev::{Service, ServiceResponse},
-    Error, web, App, test
+    test,
+    dev::{Service, ServiceRequest, ServiceResponse},
+    Error, App
 };
+use crate::addon_manager;
 
-pub async fn setup_test_app() -> impl Service<
-    actix_web::dev::ServiceRequest,
-    Response = ServiceResponse,
-    Error = Error,
-> {
+pub async fn setup_test_app() -> impl Service<ServiceRequest, Response = ServiceResponse, Error = Error> {
     test::init_service(
         App::new()
-            .configure(socialhub_auth::configure)
-            .configure(socialhub_media::configure)
-            .configure(socialhub_social::configure)
-            .configure(socialhub_streaming::configure)
+            .configure(|cfg| {
+                addon_manager::configure(cfg);
+            })
     ).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use actix_web::test;
+
     #[actix_rt::test]
-    async fn test_full_integration() {
+    async fn test_addon_endpoints() {
         let app = setup_test_app().await;
-        // Aqui podemos adicionar testes que usam múltiplos módulos
-        assert!(true);
+        
+        let req = test::TestRequest::get()
+            .uri("/addons/list")
+            .to_request();
+            
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
     }
 }
